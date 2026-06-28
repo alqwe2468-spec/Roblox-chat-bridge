@@ -1,53 +1,66 @@
-import time
-from typing import Dict, List
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import time
 
 app = FastAPI()
 
-chat_rooms: Dict[str, List[dict]] = {}
-online_users: Dict[str, float] = {}
+# UNLOCK CORS: This tells web browsers to allow requests from your HTML file
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all websites/local files to connect
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows GET and POST requests
+    allow_headers=["*"],  # Allows Content-Type and custom headers
+)
 
-class MessagePayload(BaseModel):
+# Storage for messages and online players
+messages_db = {}
+active_users = {}
+
+class Message(BaseModel):
     room: str
     sender: str
     text: str
 
-class HeartbeatPayload(BaseModel):
+class Heartbeat(BaseModel):
     username: str
 
 @app.get("/")
-def health_check():
-    return {"status": "Online", "server_time": time.time()}
+def home():
+    return {"status": "Online"}
 
 @app.post("/send")
-def process_incoming_message(data: MessagePayload):
-    room_id = data.room
-    if room_id not in chat_rooms:
-        chat_rooms[room_id] = []
-    message_entry = {
-        "sender": data.sender,
-        "text": data.text,
+def send_message(msg: Message):
+    if msg.room not in messages_db:
+        messages_db[msg.room] = []
+    
+    new_msg = {
+        "sender": msg.sender,
+        "text": msg.text,
         "timestamp": time.time()
     }
-    chat_rooms[room_id].append(message_entry)
-    if len(chat_rooms[room_id]) > 50:
-        chat_rooms[room_id].pop(0)
+    messages_db[msg.room].append(new_msg)
     return {"success": True}
 
 @app.get("/messages/{room}")
-def fetch_room_logs(room: str, since: float = 0.0):
-    if room not in chat_rooms:
+def get_messages(room: str, since: float = 0.0):
+    if room not in messages_db:
         return {"messages": []}
-    filtered_messages = [msg for msg in chat_rooms[room] if msg["timestamp"] > since]
-    return {"messages": filtered_messages}
+    
+    filtered = [m for m in messages_db[room] if m["timestamp"] > since]
+    return {"messages": filtered}
 
 @app.post("/heartbeat")
-def handle_user_heartbeat(data: HeartbeatPayload):
-    current_epoch = time.time()
-    online_users[data.username] = current_epoch
-    active_now = [
-        username for username, last_seen in online_users.items()
-        if current_epoch - last_seen < 12.0
-    ]
-    return {"online_users": active_now}
+def user_heartbeat(data: Heartbeat):
+    active_users[data.username] = time.time()
+    return {"success": True}
+
+@app.get("/users")
+def get_active_users():
+    now = time.time()
+    # Remove users who haven't sent a heartbeat in 25 seconds
+    expired = [user for user, ts in active_users.items() if now - ts > 25]
+    for user in expired:
+        del active_users[user]
+    return {"online_users": list(active_users.keys())}
