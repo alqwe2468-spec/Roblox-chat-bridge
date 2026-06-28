@@ -5,18 +5,18 @@ import time
 
 app = FastAPI()
 
-# UNLOCK CORS: This tells web browsers to allow requests from your HTML file
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all websites/local files to connect
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows GET and POST requests
-    allow_headers=["*"],  # Allows Content-Type and custom headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Storage for messages and online players
 messages_db = {}
 active_users = {}
+# Tracks the last time a user sent a message to prevent spam
+last_message_time = {}
 
 class Message(BaseModel):
     room: str
@@ -32,13 +32,25 @@ def home():
 
 @app.post("/send")
 def send_message(msg: Message):
+    now = time.time()
+    user_key = f"{msg.room}_{msg.sender}"
+    
+    # ANTI-SPAM: Check if user is sending faster than once every 2 seconds
+    if user_key in last_message_time:
+        time_passed = now - last_message_time[user_key]
+        if time_passed < 2.0:
+            raise HTTPException(status_code=429, detail="Spam detected! Slow down.")
+            
+    # Update their last message timestamp
+    last_message_time[user_key] = now
+
     if msg.room not in messages_db:
         messages_db[msg.room] = []
     
     new_msg = {
         "sender": msg.sender,
         "text": msg.text,
-        "timestamp": time.time()
+        "timestamp": now
     }
     messages_db[msg.room].append(new_msg)
     return {"success": True}
@@ -47,7 +59,6 @@ def send_message(msg: Message):
 def get_messages(room: str, since: float = 0.0):
     if room not in messages_db:
         return {"messages": []}
-    
     filtered = [m for m in messages_db[room] if m["timestamp"] > since]
     return {"messages": filtered}
 
@@ -55,12 +66,3 @@ def get_messages(room: str, since: float = 0.0):
 def user_heartbeat(data: Heartbeat):
     active_users[data.username] = time.time()
     return {"success": True}
-
-@app.get("/users")
-def get_active_users():
-    now = time.time()
-    # Remove users who haven't sent a heartbeat in 25 seconds
-    expired = [user for user, ts in active_users.items() if now - ts > 25]
-    for user in expired:
-        del active_users[user]
-    return {"online_users": list(active_users.keys())}
