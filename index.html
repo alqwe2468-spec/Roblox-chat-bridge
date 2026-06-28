@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global Chat App</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #2b2b2b; color: white; display: flex; justify-content: center; padding: 50px; }
+        #chat-container { width: 400px; background: #333; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); }
+        #messages { height: 300px; overflow-y: auto; background: #1e1e1e; padding: 10px; margin-bottom: 10px; border-radius: 5px; border: 1px solid #444; }
+        .msg { margin-bottom: 8px; font-size: 14px; line-height: 1.4; }
+        .msg strong { color: #00ffcc; }
+        input, button { width: 100%; padding: 12px; margin-bottom: 10px; border-radius: 5px; border: none; box-sizing: border-box; font-size: 14px; }
+        input { background: #444; color: white; }
+        button { background: #00ffcc; color: #111; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background: #00cca3; }
+        button:disabled { background: #555; color: #aaa; cursor: not-allowed; }
+        #emoji-container { display: flex; gap: 5px; margin-bottom: 10px; background: #222; padding: 8px; border-radius: 5px; overflow-x: auto; }
+        .emoji-btn { background: none; border: none; font-size: 20px; cursor: pointer; padding: 2px; width: auto; margin: 0; display: inline-block; }
+        .emoji-btn:hover { transform: scale(1.2); }
+    </style>
+</head>
+<body>
+
+<div id="chat-container">
+    <h2 style="margin-top: 0; text-align: center;">💬 Global Chat</h2>
+    <input type="text" id="usernameInput" placeholder="Enter username" value="Guest">
+    <div id="messages"></div>
+    
+    <div id="emoji-container">
+        <button class="emoji-btn" onclick="addEmoji('😀')">😀</button>
+        <button class="emoji-btn" onclick="addEmoji('😂')">😂</button>
+        <button class="emoji-btn" onclick="addEmoji('🔥')">🔥</button>
+        <button class="emoji-btn" onclick="addEmoji('👍')">👍</button>
+        <button class="emoji-btn" onclick="addEmoji('❤️')">❤️</button>
+        <button class="emoji-btn" onclick="addEmoji('💀')">💀</button>
+    </div>
+
+    <input type="text" id="messageInput" placeholder="Type a message...">
+    <button id="sendBtn" onclick="sendMessage()">Send</button>
+</div>
+
+<script>
+    const BACKEND_URL = "https://roblox-chat-bridge.onrender.com";
+    const room = "Global";
+    let lastSync = 0.0;
+    let isCooldown = false;
+
+    function addEmoji(emoji) {
+        const textInput = document.getElementById("messageInput");
+        textInput.value += emoji;
+        textInput.focus();
+    }
+
+    async function fetchMessages() {
+        try {
+            const response = await fetch(`${BACKEND_URL}/messages/${room}?since=${lastSync}`);
+            const data = await response.json();
+            if (data && data.messages && data.messages.length > 0) {
+                const msgBox = document.getElementById("messages");
+                data.messages.forEach(msg => {
+                    msgBox.innerHTML += `<div class="msg"><strong>${msg.sender}:</strong> ${msg.text}</div>`;
+                    lastSync = Math.max(lastSync, msg.timestamp);
+                });
+                msgBox.scrollTop = msgBox.scrollHeight;
+            }
+        } catch (e) {}
+    }
+
+    async function sendMessage() {
+        if (isCooldown) return;
+
+        const user = document.getElementById("usernameInput").value || "Anonymous";
+        const textInput = document.getElementById("messageInput");
+        const sendBtn = document.getElementById("sendBtn");
+        const text = textInput.value;
+
+        if (text.trim() === "") return;
+        textInput.value = ""; 
+
+        // Activate UI Cooldown
+        isCooldown = true;
+        sendBtn.disabled = true;
+        sendBtn.innerText = "Slowing down...";
+
+        try {
+            const response = await fetch(`${BACKEND_URL}/send`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ room: room, sender: user, text: text })
+            });
+            
+            if (response.status === 429) {
+                alert("You are typing too fast!");
+            }
+            fetchMessages();
+        } catch (e) {
+            alert("Error sending message.");
+        }
+
+        // Release cooldown after 2 seconds
+        setTimeout(() => {
+            isCooldown = false;
+            sendBtn.disabled = false;
+            sendBtn.innerText = "Send";
+        }, 2000);
+    }
+
+    document.getElementById("messageInput").addEventListener("keypress", (e) => { 
+        if (e.key === "Enter" && !isCooldown) sendMessage(); 
+    });
+    setInterval(fetchMessages, 2000);
+</script>
+</body>
+</html>
